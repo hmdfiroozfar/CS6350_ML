@@ -1,63 +1,62 @@
-from DecisionTree import DecisionTree
+
+from DecisionTree import *
 import pandas as pd
+import numpy as np
 
-def handle_unknown_values(train, test, unknown_is_value="no"):
-    if unknown_is_value != "yes":
-        for column in train.columns:
-            mode_value = train[train[column] != "unknown"][column].mode()[0]
-            train[column] = train[column].replace("unknown", mode_value)
-            test[column] = test[column].replace("unknown", mode_value)
-    return train, test
+# Column names and types
+columns = ['age_data', 'occupation', 'status', 'edu_level', 'has_default', 'account_balance', 
+           'has_housing', 'has_loan', 'comm_type', 'day_num', 'month_name', 'call_duration',
+           'num_campaign', 'days_passed', 'num_previous', 'outcome_prev', 'result']
+data_types = ['num', 'cat', 'cat', 'cat', 'bool', 'num', 'bool', 'bool', 
+              'cat', 'num', 'cat', 'num', 'num', 'num', 'num', 'cat', 'bool']
+type_mapping = dict(zip(columns, data_types))
 
-def run_decision_tree_model(train_path, test_path, max_depth_value, unknown_is_value):
-    column_names = ['age', 'job', 'marital', 'education', 'default', 'balance', 'housing', 'loan', 'contact', 'day', 'month', 'duration', 'campaign', 'pdays', 'previous', 'poutcome', 'label']
+# Reading the datasets
+train_data = pd.read_csv('ِData/Bank/train.csv', names=columns)
+test_data = pd.read_csv('Data/Bank/test.csv', names=columns)
 
-    train_data = pd.read_csv(train_path, names=column_names)
-    test_data = pd.read_csv(test_path, names=column_names)
+thresholds = {}
+ProcessedTrain = pd.DataFrame()
+ProcessedTest = pd.DataFrame()
+for col in columns:
+    if type_mapping[col] == 'num':
+        median_value = train_data[col].median()
+        thresholds[col] = median_value
+        ProcessedTrain[col + '_is_gt_' + str(median_value)] = np.where(train_data[col] > median_value, "True", 'False')
+        ProcessedTest[col + '_is_gt_' + str(median_value)] = np.where(test_data[col] > median_value, "True", 'False')
+    else:
+        ProcessedTrain[col] = train_data[col]
+        ProcessedTest[col] = test_data[col]
 
-    train_data, test_date = handle_unknown_values(train_data, test_data, unknown_is_value = unknown_is_value)
-    
+TrainingSamples = ProcessedTrain.values.tolist()
+TrainingLabels = [sample.pop() for sample in TrainingSamples]
 
-    for column in train_data.select_dtypes(include=['number']):
-        median_value = train_data[column].median()
-        train_data[column] = (train_data[column] > median_value).astype(int)
+TestingSamples = ProcessedTest.values.tolist()
+TestingLabels = [sample.pop() for sample in TestingSamples]
 
-    for column in test_data.select_dtypes(include=['number']):
-        median_value = test_data[column].median()
-        test_data[column] = (test_data[column] > median_value).astype(int)
+feature_indices = list(range(len(columns) - 1))
 
-    X_train = train_data.drop(columns=["label"])
-    y_train = train_data["label"]
+def calculate_accuracy(tree_model, samples, actual_labels):
+    predictions = [tree_model.predict(sample) for sample in samples]
+    return (np.array(actual_labels) == np.array(predictions)).mean()
 
-    X_test = test_data.drop(columns=["label"])
-    y_test = test_data["label"]
+print("Training Error:")
+for impurity_type in ["entropy", "majority", "gini"]:
+    print(20*"--")
+    print(f"Calculation with {impurity_type} as the impurity function:")
+    print(20*"--")
+    for tree_depth in range(1, 16):
+        tree_model = DecisionTree(TrainingSamples, TrainingLabels, feature_indices, depth=tree_depth, impurity_measure=impurity_type)
+        print(f"For tree depth = {tree_depth}, training error = {1 - calculate_accuracy(tree_model, TrainingSamples, TrainingLabels)}")
 
-    depth_values = list(range(1, max_depth_value+1))
-    impurity_methods = ['entropy', 'majority_error', 'gini']
-    results = {'impurity method': [], 'max tree depth': [], 'train error': [], 'test error': []}
+print("Testing Error:")
+for impurity_type in ['entropy', 'majority', "gini"]:
+    print(20*"--")
+    print(f"Calculation with {impurity_type} as the impurity function:")
+    print(20*"--")
+    for tree_depth in range(1, 16):
+        tree_model = DecisionTree(TrainingSamples, TrainingLabels, feature_indices, depth=tree_depth, impurity_measure=impurity_type)
+        print(f"For tree depth = {tree_depth}, test error = {1 - calculate_accuracy(tree_model, TestingSamples, TestingLabels)}")
 
-    for impurity_method in impurity_methods:
-        for depth in depth_values:
-            results['impurity method'].append(impurity_method)
-            results['max tree depth'].append(depth)
-            
-            dt_model = DecisionTree(measure = impurity_method, max_depth = depth)
-            dt_model.fit(X_train, y_train)
-            
-            y_test_pred = dt_model.predict(X_test)
-            y_train_pred = dt_model.predict(X_train)
 
-            train_error = dt_model.error_rate(y_train.to_list(), y_train_pred)
-            test_error = dt_model.error_rate(y_test.to_list(), y_test_pred)
 
-            results['train error'].append(train_error)
-            results['test error'].append(test_error)
-
-    output = pd.DataFrame(results)
-    return output
-
-train = "Data/Bank/train.csv"
-test = "Data/Bank/test.csv"
-
-output = run_decision_tree_model(train, test, max_depth_value = 16, unknown_is_value="no")
-print(output)
