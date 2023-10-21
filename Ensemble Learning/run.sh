@@ -1,0 +1,5 @@
+python3 adaboost_q2_a.py
+python3 bagged_trees.py
+python3 bagged_trees_bias_var.py
+python3 random_forest.py
+python3 random_forest_bias_var.py
