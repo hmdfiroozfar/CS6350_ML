@@ -1,1 +1,1 @@
-All core functions can be found in Adaboost.py. Each of the supplementary Python files corresponds to a specific section of the question. These files contain all the necessary functions. To execute, simply adjust the hyperparameters and run the main function if there is any.
+All core functions can be found in Adaboost.py. Each of the other Python files corresponds to a specific section of question 2. These files contain all the necessary functions for the corresponding part. To execute, simply adjust the hyperparameters and run the main function if there is any.
