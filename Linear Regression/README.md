@@ -1,0 +1,1 @@
+The Python file linear_regression.py contains all the essential functions for Question 4 in HW2. To run the code, simply modify the hyperparameters and execute the main function.
