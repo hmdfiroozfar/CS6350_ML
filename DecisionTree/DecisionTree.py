@@ -1,141 +1,200 @@
-
 import numpy as np
-import pandas as pd
+from math import log2
 
 class DecisionTree:
-    def __init__(self, measure='entropy', max_depth=None):
-        self.measure = measure
-        self.max_depth = max_depth
-        self.tree = None
+    def __init__(self, train, labels, attributes, depth=-1, weights=None, impurity_measure='entropy'):
+        self.impurity_functions = {
+            'gini': self.gini_impurity,
+            'entropy': self.entropy_impurity,
+            'majority': self.majority_error
+        }
+        self.impurity_function = self.impurity_functions[impurity_measure]
 
-    def fit(self, x, y):
-        input_data = pd.concat([x, y], axis=1)
-        self.tree = self.id3_alg(input_data, x.columns, self.max_depth)
+        self.leaf = False
+        self.label, num_values = self.determine_majority_label(labels, weights)
 
-    def id3_alg(self, data, attributes, depth):
-        labels = data.iloc[:, -1].tolist()
+        if len(attributes) == 0 or num_values == 1 or depth == 0:
+            self.leaf = True  
+            return
 
-    # If all labels are the same
-        if len(set(labels)) == 1:
-          return labels[0]
+        self.split_attribute, values = self.select_best_attribute(train, labels, attributes, weights)
 
-    # If depth is 0 or no attributes left
-        if depth == 0 or len(attributes) == 0:
-          most_common_label = max(set(labels), key=labels.count)
-          return most_common_label
+        split_train, split_labels, split_weights = self.partition_data(train, labels, self.split_attribute, weights)
+        self.sub_trees = {}
+        attributes.remove(self.split_attribute)
 
-        best_attr = self.best_attribute(data, attributes)
-        tree = {}
-        tree[best_attr] = {}
-        best_attr_values = data[best_attr].unique()
-        for value in best_attr_values:
-          subset = data[data[best_attr] == value].drop(columns=[best_attr])
+        for value in split_train:
+            self.sub_trees[value] = DecisionTree(split_train[value], split_labels[value], attributes, depth - 1, split_weights[value], impurity_measure)
 
-          if depth:
-            new_depth = depth - 1
-          else:
-            new_depth = None
+        attributes.append(self.split_attribute)
 
-          subtree = self.id3_alg(subset, subset.columns[:-1], new_depth)
+    def predict(self, instance):
+        if self.leaf:
+            return self.label
+        if instance[self.split_attribute] in self.sub_trees:
+            return self.sub_trees[instance[self.split_attribute]].predict(instance)   
+        return self.label   
 
-          tree[best_attr][value] = subtree
+    def select_best_attribute(self, train, labels, attributes, weights):
+        initial_impurity = self.impurity_function(labels, weights)
+        max_info_gain = -float('inf')
+        best_attribute = None
+        best_values = None
 
-        return tree
+        for attribute in attributes:
+            split_impurity, split_values = self.impurity_given_attribute(train, labels, attribute, weights)
+            info_gain = initial_impurity - split_impurity
 
-    def best_attribute(self, data, attributes):
-        best_gain = -1
-        best_attr = None
+            if info_gain > max_info_gain:
+                max_info_gain = info_gain
+                best_attribute = attribute
+                best_values = split_values
 
-        for attr in attributes:
-            gain = self.information_gain(data, attr)
-            if gain > best_gain:
-                best_gain = gain
-                best_attr = attr
+        return best_attribute, best_values
 
-        return best_attr
+    def impurity_given_attribute(self, train, labels, attribute, weights=None):
+        n = len(labels)
+        if weights is None:
+            weights = [1] * n
 
-    def information_gain(self, data, attribute):
-        labels = data.iloc[:, -1].tolist()
-        total_impurity = self.calculate_impurity(labels)
+        partitioned_weights = {}
+        partitioned_labels = {}
+        total_weight = sum(weights)
 
-        attr_values = data[attribute].unique()
-        total_weighted_impurity = 0
+        for idx, record in enumerate(train):
+            attr_value = record[attribute]
+            if attr_value not in partitioned_weights:
+                partitioned_weights[attr_value] = []
+                partitioned_labels[attr_value] = []
 
-        for value in attr_values:
-            subset_labels = data[data[attribute] == value].iloc[:, -1].tolist()
-            weight = len(subset_labels) / len(data)
-            impurity = self.calculate_impurity(subset_labels)
-            total_weighted_impurity += weight * impurity
+            partitioned_weights[attr_value].append(weights[idx])
+            partitioned_labels[attr_value].append(labels[idx])
 
-        return total_impurity - total_weighted_impurity
+        impurity = 0
+        for attr_value in partitioned_weights:
+            weighted_impurity = self.impurity_function(partitioned_labels[attr_value], partitioned_weights[attr_value])
+            impurity += (sum(partitioned_weights[attr_value]) / total_weight) * weighted_impurity
 
-    def calculate_impurity(self, labels):
-        if self.measure == 'entropy':
-            return self.entropy(labels)
-        elif self.measure == 'majority_error':
-            return self.majority_error(labels)
-        elif self.measure == 'gini':
-            return self.gini_index(labels)
-        else:
-            raise ValueError(f"Unknown impurity measure: {self.measure}")
+        return impurity, list(partitioned_weights.keys())
 
-    def entropy(self, labels):
-        _, counts = np.unique(labels, return_counts=True)
-        probabilities = counts / len(labels)
-        entropy = -sum(probabilities * np.log2(probabilities))
-        return entropy
+    # Impurity functions
+    def gini_impurity(self, labels, weights=None):
+        if weights is None:
+            weights = [1] * len(labels)
+        
+        label_counts = {}
+        total_weight = sum(weights)
+        for idx, label in enumerate(labels):
+            label_counts[label] = label_counts.get(label, 0) + weights[idx]
 
-    def majority_error(self, labels):
-        _, counts = np.unique(labels, return_counts=True)
-        majority_count = max(counts)
-        me = 1 - majority_count / len(labels)
-        return me
+        impurity = 1 - sum([(count/total_weight)**2 for count in label_counts.values()])
+        return impurity
 
-    def gini_index(self, labels):
-        _, counts = np.unique(labels, return_counts=True)
-        probs = counts / len(labels)
-        gini = 1 - sum(probs**2)
-        return gini
+    def entropy_impurity(self, labels, weights=None):
+        if weights is None:
+            weights = [1] * len(labels)
+        
+        label_counts = {}
+        total_weight = sum(weights)
+        for idx, label in enumerate(labels):
+            label_counts[label] = label_counts.get(label, 0) + weights[idx]
 
-    def predict(self, data):
-        results = []
-        for _, row in data.iterrows():
-            result = self.make_prediction(row, self.tree)
-            results.append(result)
-        return results
+        impurity = -sum([(count/total_weight) * log2(count/total_weight) for count in label_counts.values()])
+        return impurity
 
-    def make_prediction(self, row, tree):
-        if not isinstance(tree, dict):
-            return tree
+    def majority_error(self, labels, weights=None):
+        if weights is None:
+            weights = [1] * len(labels)
+        
+        label_counts = {}
+        for idx, label in enumerate(labels):
+            label_counts[label] = label_counts.get(label, 0) + weights[idx]
 
-        attribute = next(iter(tree))
+        max_count = max(label_counts.values())
+        return 1 - max_count / sum(weights)
 
-        if row[attribute] in tree[attribute]:
-            return self.make_prediction(row, tree[attribute][row[attribute]])
-        else:
-            labels = self.get_all_leaf_labels(tree[attribute])
-            if not labels:
-                raise ValueError("No leaf labels found in subtree values!")
+    # Helper functions
+    def determine_majority_label(self, labels, weights=None):
+        if weights is None:
+            weights = [1] * len(labels)
+        
+        label_counts = {}
+        for idx, label in enumerate(labels):
+            label_counts[label] = label_counts.get(label, 0) + weights[idx]
 
-            return max(labels, key=labels.count)
+        majority_label = max(label_counts, key=label_counts.get)
+        return majority_label, len(label_counts)
 
-    def get_all_leaf_labels(self, subtree):
-        if not isinstance(subtree, dict):
-            return [subtree]
+    def partition_data(self, train, labels, attribute, weights=None):
+        n = len(labels)
+        if weights is None:
+            weights = [1] * n
 
-        labels = []
-        for key in subtree:
-          labels.extend(self.get_all_leaf_labels(subtree[key]))
-        return labels
+        partitioned_train = {}
+        partitioned_labels = {}
+        partitioned_weights = {}
+        
+        for idx, record in enumerate(train):
+            attr_value = record[attribute]
+            if attr_value not in partitioned_train:
+                partitioned_train[attr_value] = []
+                partitioned_labels[attr_value] = []
+                partitioned_weights[attr_value] = []
 
-    @staticmethod
-    def error_rate(y_true, y_pred):
-        if len(y_true) != len(y_pred):
-          raise ValueError("Input lists must have the same length")
+            partitioned_train[attr_value].append(record)
+            partitioned_labels[attr_value].append(labels[idx])
+            partitioned_weights[attr_value].append(weights[idx])
 
-        incorrect_predictions = 0
-        for true, pred in zip(y_true, y_pred):
-          if true != pred:
-            incorrect_predictions += 1
-        error = incorrect_predictions / len(y_true)
-        return error
+        return partitioned_train, partitioned_labels, partitioned_weights
+
+
+import pandas as pd
+import numpy as np
+
+# Column names and types
+columns = ['age_data', 'occupation', 'status', 'edu_level', 'has_default', 'account_balance', 
+           'has_housing', 'has_loan', 'comm_type', 'day_num', 'month_name', 'call_duration',
+           'num_campaign', 'days_passed', 'num_previous', 'outcome_prev', 'result']
+data_types = ['num', 'cat', 'cat', 'cat', 'bool', 'num', 'bool', 'bool', 
+              'cat', 'num', 'cat', 'num', 'num', 'num', 'num', 'cat', 'bool']
+type_mapping = dict(zip(columns, data_types))
+
+# Reading the datasets
+train_data = pd.read_csv('train.csv', names=columns)
+test_data = pd.read_csv('test.csv', names=columns)
+print(train_data.head())
+
+thresholds = {}
+ProcessedTrain = pd.DataFrame()
+ProcessedTest = pd.DataFrame()
+for col in columns:
+    if type_mapping[col] == 'num':
+        median_value = train_data[col].median()
+        thresholds[col] = median_value
+        ProcessedTrain[col + '_is_gt_' + str(median_value)] = np.where(train_data[col] > median_value, "True", 'False')
+        ProcessedTest[col + '_is_gt_' + str(median_value)] = np.where(test_data[col] > median_value, "True", 'False')
+    else:
+        ProcessedTrain[col] = train_data[col]
+        ProcessedTest[col] = test_data[col]
+
+TrainingSamples = ProcessedTrain.values.tolist()
+TrainingLabels = [sample.pop() for sample in TrainingSamples]
+
+TestingSamples = ProcessedTest.values.tolist()
+TestingLabels = [sample.pop() for sample in TestingSamples]
+
+feature_indices = list(range(len(columns) - 1))
+
+def calculate_accuracy(tree_model, samples, actual_labels):
+    predictions = [tree_model.predict(sample) for sample in samples]
+    return (np.array(actual_labels) == np.array(predictions)).mean()
+
+for impurity_type in ["entropy", "majority", "gini"]:
+    for tree_depth in range(1, 16):
+        tree_model = DecisionTree(TrainingSamples, TrainingLabels, feature_indices, depth=tree_depth, impurity_measure=impurity_type)
+        print(f"For tree depth = {tree_depth}, training error = {1 - calculate_accuracy(tree_model, TrainingSamples, TrainingLabels)}")
+
+for impurity_type in ['entropy', 'majority', "gini"]:
+    for tree_depth in range(1, 16):
+        tree_model = DecisionTree(TrainingSamples, TrainingLabels, feature_indices, depth=tree_depth, impurity_measure=impurity_type)
+        print(f"For tree depth = {tree_depth}, test error = {1 - calculate_accuracy(tree_model, TestingSamples, TestingLabels)}")
