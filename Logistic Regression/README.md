@@ -1,0 +1,1 @@
+The python file LR.py contains all the essential functions for Question 3 in HW5. To run the code, simply run the main function.
